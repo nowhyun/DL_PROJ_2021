@@ -1,2 +1,2 @@
-# DL_Proj_21
-[CSED538/AIGS538] Final Project '21
+# [CSED538/AIGS538] Deep Learning Final Project '21
+ㅜㅜ
