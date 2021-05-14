@@ -10,7 +10,7 @@ The implemented methods are as follows:
   3. Electra Classifier
 
 ## 3. Usage
-For BERT, simply run "main.py --model BERT"
+For BERT, simply run "run.py --model BERT"
 
 
 
