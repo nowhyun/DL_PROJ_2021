@@ -40,7 +40,7 @@ os.environ['PYTHONHASHSEED'] = str(42)
 #################################################################################################################
 # Create the BertClassifier class
 class BertClassifier(nn.Module):
-    def __init__(self, opt, freeze_bert=False):
+    def __init__(self, opt):
         """
         :param opt: hyper parameters
         :param freeze_bert: set 'False' to fine-tune the BERT model [bool]
@@ -59,7 +59,7 @@ class BertClassifier(nn.Module):
                                         nn.ReLU(),
                                         nn.Linear(H, D_out))
 
-        if freeze_bert:
+        if opt.freeze_pretrained == 1:
             for param in self.bert.parameters():
                 param.requires_grad = False
 
@@ -108,3 +108,12 @@ class BertClassifier(nn.Module):
         logits = self.classifier(sent_embeddings_tsr)
 
         return logits
+    
+    def extract_sent_embd(self, input_ids, attention_masks):
+        """After training is completed, extract the embdding vectors
+        """
+        # Feed input to ELECTRA
+        outputs = self.bert(input_ids=input_ids,
+                            attention_mask=attention_masks)
+        embeddings_tsr = outputs[0] # [batch_size, max_len, 768] e.g. CLS = [:,0,:], 1st token = [:,1,:]
+        return embeddings_tsr
