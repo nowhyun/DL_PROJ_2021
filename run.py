@@ -1,4 +1,5 @@
 import argparse
+import json
 import random
 import time
 import os
@@ -8,15 +9,16 @@ warnings.filterwarnings("ignore")
 from copy import deepcopy
 import pandas as pd
 import numpy as np
+import seaborn as sns
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 mpl.style.use("ggplot")
 
 import sklearn
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedKFold
 
 import transformers
-from transformers import BertTokenizer, BertModel, AdamW, get_linear_schedule_with_warmup
+from transformers import BertTokenizer, BertModel, ElectraTokenizer, ElectraModel, AdamW, get_linear_schedule_with_warmup
 
 import torch
 import torch.nn as nn
@@ -31,11 +33,19 @@ from Utils.dataset import *
 from Utils.utils import *
 from Models.BertClf import *
 from Models.LstmClf import *
+from Models.ElectraClf import *
+
 
 #################################################################################################################
 # Train and Evaluate
 #################################################################################################################
-def train(model, train_dataloader, valid_dataloader=None, evaluation=False):
+def train_fn(model,
+             optimizer,
+             scheduler,
+             loss_fn,
+             train_dataloader,
+             valid_dataloader=None,
+             evaluation=False):
     """
     Train the BertClassifier model with early stop trick.
     
@@ -47,14 +57,21 @@ def train(model, train_dataloader, valid_dataloader=None, evaluation=False):
     """
     # Start training loop
     print("Start training...\n")
-    es_eval_dict = {"epoch": 0, "train_loss": 0, "valid_loss": 0, "valid_acc": 0} # early stop
+    es_eval_dict = {
+        "epoch": 0,
+        "train_loss": 0,
+        "valid_loss": 0,
+        "valid_acc": 0
+    }  # early stop
     for epoch_i in range(opt.max_epoch):
         # =======================================
         #               Training
         # =======================================
         # Print the header of the result table
-        print(f"{'Epoch':^7} | {'Batch':^7} | {'Train Loss':^12} | {'Val Loss':^10} | {'Val Acc':^9} | {'Elapsed':^9}")
-        print("-"*70)
+        print(
+            f"{'Epoch':^7} | {'Batch':^7} | {'Train Loss':^12} | {'Val Loss':^10} | {'Val Acc':^9} | {'Elapsed':^9}"
+        )
+        print("-" * 70)
 
         # Measure the elapsed time of each epoch
         t0_epoch, t0_batch = time.time(), time.time()
@@ -67,9 +84,10 @@ def train(model, train_dataloader, valid_dataloader=None, evaluation=False):
 
         # For each batch of training data...
         for step, batch in enumerate(train_dataloader):
-            batch_counts +=1
+            batch_counts += 1
             # Load batch to GPU
-            b_ids_tsr, b_masks_tsr, b_labels_tsr = tuple(tsrs.to(device) for tsrs in batch)
+            b_ids_tsr, b_masks_tsr, b_labels_tsr = tuple(
+                tsrs.to(device) for tsrs in batch)
 
             # Zero out any previously calculated gradients
             model.zero_grad()
@@ -79,7 +97,7 @@ def train(model, train_dataloader, valid_dataloader=None, evaluation=False):
                 logits = model(b_ids_tsr)
             else:
                 logits = model(b_ids_tsr, b_masks_tsr)
-            
+
             # Compute loss and accumulate the loss values
             loss = loss_fn(logits, b_labels_tsr)
             batch_loss += loss.item()
@@ -96,12 +114,15 @@ def train(model, train_dataloader, valid_dataloader=None, evaluation=False):
             scheduler.step()
 
             # Print the loss values and time elapsed for every 20 batches
-            if (step % 20 == 0 and step != 0) or (step == len(train_dataloader) - 1):
+            if (step % 20 == 0
+                    and step != 0) or (step == len(train_dataloader) - 1):
                 # Calculate time elapsed for 20 batches
                 time_elapsed = time.time() - t0_batch
 
                 # Print training results
-                print(f"{epoch_i + 1:^7} | {step:^7} | {batch_loss / batch_counts:^12.6f} | {'-':^10} | {'-':^9} | {time_elapsed:^9.2f}")
+                print(
+                    f"{epoch_i + 1:^7} | {step:^7} | {batch_loss / batch_counts:^12.6f} | {'-':^10} | {'-':^9} | {time_elapsed:^9.2f}"
+                )
 
                 # Reset batch tracking variables
                 batch_loss, batch_counts = 0, 0
@@ -110,41 +131,52 @@ def train(model, train_dataloader, valid_dataloader=None, evaluation=False):
         # Calculate the average loss over the entire training data
         avg_train_loss = total_loss / len(train_dataloader)
 
-        print("-"*70)
+        print("-" * 70)
         # =======================================
         #               Evaluation
         # =======================================
-        model_save_path = str(opt.save_model_path) + "/" + opt.signature +'.model'
+        model_save_path = str(
+            opt.save_model_path) + "/" + opt.signature + '.model'
         if evaluation == True:
-            previous_valid_acc = es_eval_dict["valid_acc"] # early stop
+            previous_valid_acc = es_eval_dict["valid_acc"]  # early stop
             # After the completion of each training epoch, measure the model's performance
             # on our validation set.
-            valid_loss, valid_acc = evaluate(model, valid_dataloader)
+            valid_loss, valid_acc = evaluate_fn(model, loss_fn,
+                                                valid_dataloader)
 
             # Print performance over the entire training data
             time_elapsed = time.time() - t0_epoch
-            print(f"{epoch_i + 1:^7} | {'-':^7} | {avg_train_loss:^12.6f} | {valid_loss:^10.6f} | {valid_acc:^9.2f} | {time_elapsed:^9.2f}")
-            print("-"*70)
+            print(
+                f"{epoch_i + 1:^7} | {'-':^7} | {avg_train_loss:^12.6f} | {valid_loss:^10.6f} | {valid_acc:^9.2f} | {time_elapsed:^9.2f}"
+            )
+            print("-" * 70)
             if previous_valid_acc < valid_acc:
-                es_eval_dict["epoch"]=epoch_i
-                es_eval_dict["train_loss"]=avg_train_loss
-                es_eval_dict["valid_loss"]=valid_loss
-                es_eval_dict["valid_acc"]=valid_acc
-                if opt.save == 1: 
+                es_eval_dict["epoch"] = epoch_i
+                es_eval_dict["train_loss"] = avg_train_loss
+                es_eval_dict["valid_loss"] = valid_loss
+                es_eval_dict["valid_acc"] = valid_acc
+                if opt.save == 1:
                     torch.save(model.state_dict(), model_save_path)
-                    print('\tthe model is improved... save at', model_save_path)
+                    print('\tthe model is improved... save at',
+                          model_save_path)
         print("\n")
     print("Final results table")
-    print("-"*70)
-    print(f"{'Epoch':^7} | {'Batch':^7} | {'Train Loss':^12} | {'Val Loss':^10} | {'Val Acc':^9} | {'Elapsed':^9}")
-    final_epoch, final_train_loss, final_valid_loss, final_valid_acc = es_eval_dict["epoch"], es_eval_dict["train_loss"], es_eval_dict["valid_loss"], es_eval_dict["valid_acc"]
-    print(f"{final_epoch + 1:^7} | {'-':^7} | {final_train_loss:^12.6f} | {final_valid_loss:^10.6f} | {final_valid_acc:^9.2f} | {0:^9.2f}")
-    print("-"*70)
+    print("-" * 70)
+    print(
+        f"{'Epoch':^7} | {'Batch':^7} | {'Train Loss':^12} | {'Val Loss':^10} | {'Val Acc':^9} | {'Elapsed':^9}"
+    )
+    final_epoch, final_train_loss, final_valid_loss, final_valid_acc = es_eval_dict[
+        "epoch"], es_eval_dict["train_loss"], es_eval_dict[
+            "valid_loss"], es_eval_dict["valid_acc"]
+    print(
+        f"{final_epoch + 1:^7} | {'-':^7} | {final_train_loss:^12.6f} | {final_valid_loss:^10.6f} | {final_valid_acc:^9.2f} | {0:^9.2f}"
+    )
+    print("-" * 70)
     print("Training complete!")
-    return model
+    return model, final_train_loss, final_valid_loss, final_valid_acc
 
-    
-def evaluate(model, valid_dataloader):
+
+def evaluate_fn(model, loss_fn, valid_dataloader):
     """
     After the completion of each training epoch, measure the model's performance on our validation set.
     
@@ -165,7 +197,8 @@ def evaluate(model, valid_dataloader):
     # For each batch in our validation set...
     for batch in valid_dataloader:
         # Load batch to GPU
-        b_ids_tsr, b_masks_tsr, b_labels_tsr = tuple(t.to(device) for t in batch)
+        b_ids_tsr, b_masks_tsr, b_labels_tsr = tuple(
+            t.to(device) for t in batch)
 
         # Compute logits
         with torch.no_grad():
@@ -192,12 +225,77 @@ def evaluate(model, valid_dataloader):
     return valid_loss, valid_acc
 
 
+def cross_validation(full_dataset=None, n_splits=5):
+    """Define a cross validation function
+    """
+    train_loss_list, valid_loss_list, valid_acc_list = [], [], []
+    full_ids = full_dataset.ids_tsr.detach().cpu().numpy()
+    full_labels = full_dataset.labels.detach().cpu().numpy()
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=False)
+    for i, idx in enumerate(skf.split(full_ids, full_labels)):
+        print(f"Start {i}-th cross validation...\n")
+        train_indices, valid_indices = idx[0], idx[1]
+        print(train_indices)
+        print(valid_indices)
+
+        train_subset = torch.utils.data.dataset.Subset(full_dataset,
+                                                       train_indices)
+        valid_subset = torch.utils.data.dataset.Subset(full_dataset,
+                                                       valid_indices)
+
+        print(
+            f"len of train set: {len(train_subset)}, len of valid set: {len(valid_subset)}"
+        )
+        print()
+
+        train_dataloader = DataLoader(
+            train_subset,
+            batch_size=opt.batch_size,
+            shuffle=True,
+        )
+        valid_dataloader = DataLoader(
+            valid_subset,
+            batch_size=opt.batch_size,
+            shuffle=True,
+        )
+
+        # Specify the loss function
+        loss_fn = nn.CrossEntropyLoss()
+
+        # Initialize the model
+        untrained_model, optimizer, scheduler = initialize_model(
+            opt, len(train_dataloader), device)
+
+        _, train_loss, valid_loss, valid_acc = train_fn(untrained_model,
+                                                        optimizer,
+                                                        scheduler,
+                                                        loss_fn,
+                                                        train_dataloader,
+                                                        valid_dataloader,
+                                                        evaluation=True)
+
+        train_loss_list.append(train_loss)
+        valid_loss_list.append(valid_loss)
+        valid_acc_list.append(valid_acc)
+
+        print(f"...Complete {i}-th cross validation\n")
+    train_loss_arr = np.array(train_loss_list)
+    valid_loss_arr = np.array(valid_loss_list)
+    valid_acc_arr = np.array(valid_acc_list)
+    valid_avg_score = np.mean(valid_acc_arr)
+    print("=" * 60)
+    print(f"Average valid accuracy: {valid_avg_score}")
+    print("=" * 60)
+    return train_loss_arr, valid_loss_arr, valid_acc_arr, valid_avg_score
+
+
 if __name__ == "__main__":
     #################################################################################################################
     # Library Version
     #################################################################################################################
     print(f"pandas version: {pd.__version__}")
     print(f"numpy version: {np.__version__}")
+    print(f"seaborn version: {sns.__version__}")
     print(f"matplotlib version: {mpl.__version__}")
     print(f"sklearn version: {sklearn.__version__}")
     print(f"transformers version: {transformers.__version__}")
@@ -220,38 +318,35 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # model
-    parser.add_argument('--model', type=str, default='BILSTM', help='BERT, BILSTM, ELECTRA')
+    parser.add_argument('--model', type=str, default='ELECTRA', help='BERT, BILSTM, ELECTRA')
     parser.add_argument('--sent_embedding', type=int, default=0, help='0: CLS, 1: 4-layer concat')
-    parser.add_argument('--hidden_dim', type=int, default=64, help='for wide models')
-    parser.add_argument('--num_layer', type=int, default=2, help='for deep models')
-    parser.add_argument('--dropout', type=float, default=0.3, help='dropout ratio')
+    parser.add_argument('--hidden_dim', type=int, default=768, help='BERT or ELECTRA: hidden dimension of classifier, BILSTM: hidden dimension of lstm')
+    parser.add_argument('--num_layer', type=int, default=2, help='BILSTM: number of layers of lstm')
+    parser.add_argument('--dropout', type=float, default=0.5, help='dropout ratio')
 
     # training
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--gpu', type=int, default=0, help='0,1,2,3')
-    parser.add_argument('--max_epoch', type=int, default=15)
+    parser.add_argument('--max_epoch', type=int, default=1)
     parser.add_argument('--save', type=int, default=1, help='0: false, 1:true')
-    parser.add_argument('--optimizer', type=int, default=1, help='1: SGD, 2: RMSProp, 3: Adam')
-    parser.add_argument('--lr', type=float, default=5e-5, help='learning rate, 5e-5, 3e-5 or 2e-5')
-    parser.add_argument('--eps', type=float, default=1e-8, help='epsilon')
-    parser.add_argument('--momentum', type=float, default=0.9, help='epsilon')
-    parser.add_argument('--weight_decay', type=float, default=5e-4, help='epsilon')
+    parser.add_argument('--lr_pretrained', type=float, default=1e-05, help='learning rate, 5e-5, 3e-5 or 2e-5')
+    parser.add_argument('--lr_clf', type=float, default=0.0001, help='learning rate, 5e-5, 3e-5 or 2e-5')
+    parser.add_argument('--freeze_pretrained', type=int, default=0, help='0: false, 1:true')
+    parser.add_argument('--eps', type=float, default=1e-8, help='epsilon for AdamW, 1e-8')
+    parser.add_argument('--weight_decay', type=float, default=5e-4, help='weight decay for AdamW, 5e-4')
 
     # dataset
     parser.add_argument('--data_path', type=str, default='./Dataset')
     parser.add_argument('--save_model_path', type=str, default='./Saved_models')
     parser.add_argument('--save_submission_path', type=str, default='./Submissions')
-    parser.add_argument('--balanced', type=int, default=0, help='0: default, 1: easy to hard')
-    parser.add_argument('--n_classes', type=int, default=5, help='for balanced')
-    parser.add_argument('--n_samples', type=int, default=5, help='for balanced')
-    parser.add_argument('--max_len', type=int, default=80, help='max length of the sentence')
-    parser.add_argument('--replace', type=int, default=1, help='preprocessed option 0 or 1')
-    parser.add_argument('--valid_ratio', type=float, default=1/6)
-    parser.add_argument('--author', type=str, default='who')
+    parser.add_argument('--max_len', type=int, default=50, help='max length of the sentence')
+    parser.add_argument('--aug', type=int, default=0, help='0: false, 1: true(ru)')
+    parser.add_argument('--split_ratio', type=int, default=3, help='k/10, k in [1,2,3]')
+    parser.add_argument('--author', type=str, default='jh')
 
 
-    opt = parser.parse_args() # in .py env
-    # opt, _ = parser.parse_known_args() # in .ipynb env
+    #     opt = parser.parse_args() # in .py env
+    opt, _ = parser.parse_known_args() # in .ipynb env
 
     #################################################################################################################
     # Training Device
@@ -259,10 +354,16 @@ if __name__ == "__main__":
     device = torch.device("cuda:" + str(opt.gpu)) if torch.cuda.is_available() else torch.device("cpu")
     torch.cuda.set_device(device) # change allocation of current GPU
     print(f'training device: {device, torch.cuda.get_device_name()}')
-    signature = str(opt.author) + "_" + str(opt.model) + "_" + str(opt.sent_embedding) + "_" + str(opt.hidden_dim) + "_" + str(opt.batch_size) + "_" + str(opt.max_epoch) + "_" + str(opt.lr) + "_" + str(opt.eps) 
+    curr_time = time.localtime()
+    signature = f"{opt.author}_{opt.model}_{curr_time.tm_mon}M_{curr_time.tm_mday}D_{curr_time.tm_hour}H_{curr_time.tm_min}M"
     opt.signature = signature
     print(f'signature: {signature}')
-    
+    with open('./Saved_models/' + signature + '_opt.txt', 'w') as f:
+        json.dump(opt.__dict__, f, indent=2)
+
+    #################################################################################################################
+    # Main
+    #################################################################################################################
     # Load the DataLoaders
     train_dataloader, valid_dataloader, test_dataloader = data_load(opt)
 
@@ -272,21 +373,24 @@ if __name__ == "__main__":
     # Initialize the model
     untrained_model, optimizer, scheduler = initialize_model(opt, len(train_dataloader), device)
 
-    trained_model = train(untrained_model, train_dataloader, valid_dataloader=valid_dataloader, evaluation=True)
+    trained_model, _, _, _ = train_fn(untrained_model, optimizer, scheduler, loss_fn, train_dataloader, valid_dataloader=valid_dataloader, evaluation=True)
     
-    # Train the model on the entire training data
-    if opt.save == 1:
-        model_save_path = str(opt.save_model_path) + "/" + signature +'.model'
-        untrained_model.load_state_dict(torch.load(model_save_path))
-    opt.lr = opt.lr * 0.1
-    full_trained_model = train(untrained_model, valid_dataloader, evaluation=False)
+    #################################################################################################################
+    # Full train
+    #################################################################################################################
+    full_dataloader = data_load(opt, flag="full")
+    untrained_model, optimizer, scheduler = initialize_model(opt, len(train_dataloader), device)
+    full_trained_model, _, _, _ = train_fn(untrained_model, optimizer, scheduler, loss_fn, full_dataloader, evaluation=False)
     model_save_path = str(opt.save_model_path) + "/" + opt.signature +'_full.model'
     if opt.save == 1: 
         torch.save(full_trained_model.state_dict(), model_save_path)
         print('\tthe model is improved... save at', model_save_path)
-
-    # full_dataloader = data_load(opt, flag="full")
-    # full_trained_model = train(untrained_model, full_dataloader, evaluation=False)
+        
+    #################################################################################################################
+    # Save the submission file
+    #################################################################################################################
+    make_submission(trained_model, opt, device, test_dataloader)
+    make_submission(trained_model, opt, device, test_dataloader, full=True)
     
-    make_submission(untrained_model, opt, device, test_dataloader)
-    make_submission(untrained_model, opt, device, test_dataloader, full=True)
+    # Print the number of parameters
+    numOfparams(trained_model)
