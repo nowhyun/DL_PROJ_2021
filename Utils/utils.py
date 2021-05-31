@@ -28,6 +28,7 @@ from torchvision import transforms, datasets
 from Models.BertClf import *
 from Models.LstmClf import *
 from Models.ElectraClf import *
+from Models.ConvClf import *
 
 
 #################################################################################################################
@@ -87,6 +88,13 @@ def initialize_model(opt, len_train_dataloader, device):
         
     elif opt.model == "BILSTM":
         model = LstmClassifier(opt, 30522)
+        model.to(device)
+
+        optimizer = torch.optim.AdamW(model.parameters(), lr=opt.lr_clf, weight_decay=opt.weight_decay)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=5, eta_min=0.0001)
+        
+    elif opt.model == "CNN":
+        model = ConvClassifier(opt, 30522)
         model.to(device)
 
         optimizer = torch.optim.AdamW(model.parameters(), lr=opt.lr_clf, weight_decay=opt.weight_decay)

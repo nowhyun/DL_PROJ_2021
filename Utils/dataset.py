@@ -54,7 +54,7 @@ def preprocessing_for_bert(data, opt):
     :return attention_masks: tensor of indices specifying wich tokens should be attended to by the model [tensor]
     """
     input_ids, attention_masks = [], []
-    if opt.model in ["BILSTM", "BERT"]:
+    if opt.model in ["BILSTM", "BERT", "CNN"]:
         print("Apply the BertTokenizer...")
         tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     elif opt.model == "ELECTRA":
