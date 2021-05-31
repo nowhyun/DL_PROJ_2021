@@ -5,9 +5,10 @@ Fine-grained sentence classification
 ## 2. Implemented Methods
 The implemented methods are as follows:
   
-  1. Bert Classifier 
-  2. Bilstm Classifier
-  3. Electra Classifier
+  1. Bilstm Classifier 
+  2. CNN Classifier
+  3. Bert Classifier
+  4. Electra Classifier
 
 ## 3. Usage
 For BERT, simply run "run.py --model BERT --author yourname"
