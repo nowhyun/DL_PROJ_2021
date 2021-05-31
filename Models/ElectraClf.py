@@ -64,6 +64,7 @@ class ElectraClassifier(nn.Module):
 #                                         nn.Linear(384, 192), 
 #                                         nn.Dropout(p=opt.dropout, inplace=False),
 #                                         nn.Linear(192, D_out))
+        self.dropout = nn.Dropout(p=opt.dropout)
 
         if opt.freeze_pretrained == 1:
             for param in self.electra.parameters():
@@ -85,6 +86,7 @@ class ElectraClassifier(nn.Module):
         if self.opt.sent_embedding == 0:
             # Extract the last hidden state of the token '[CLS]'
             sent_embeddings_tsr = outputs[0][:, 0, :] # [batch_size, 768]
+            sent_embeddings_tsr = self.dropout(sent_embeddings_tsr)
 #             print(f"ElectraClassifier - forward - sent_embeddings_tsr.shape: {sent_embeddings_tsr.shape}")
 
         if self.opt.sent_embedding == 1:

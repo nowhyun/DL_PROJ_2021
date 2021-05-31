@@ -85,3 +85,19 @@ class LstmClassifier(nn.Module):
 #         print(f"LstmClassifier - forward - logits.shape: {logits.shape}")
 
         return logits
+
+    def extract_sent_embd(self, input_ids):
+        """After training is completed, extract the embdding vectors
+        """
+        # Feed input to embedding layer
+        sent_embeddings_tsr = self.embedding(input_ids) # [batch_size, max_len, embedding_dim] ? 
+        sent_embeddings_tsr = self.drop(sent_embeddings_tsr)
+
+        # Feed embedding to Lstm
+        output, (hidden_states_tsr, cell_states_tsr) = self.lstm(sent_embeddings_tsr) # hidden_states_tsr = [2, batch_size, hidden_size]
+
+        # Feed input to classifier to compute logits
+        right_hidden_states_tsr = hidden_states_tsr[-1] # [batch_size, hidden_size]
+        left_hidden_states_tsr = hidden_states_tsr[-2] # [batch_size, hidden_size]
+        final_hidden_states_tsr = torch.cat((right_hidden_states_tsr, left_hidden_states_tsr), dim=1)  # [batch_size, 2*hidden_size]
+        return final_hidden_states_tsr
