@@ -40,7 +40,7 @@ os.environ['PYTHONHASHSEED'] = str(42)
 #################################################################################################################
 # Create the LstmClassifier class
 class LstmClassifier(nn.Module):
-    def __init__(self, opt, vocab_size):
+    def __init__(self, opt, vocab_size=30522):
         """
         :param opt: hyper parameters
         """
