@@ -132,7 +132,7 @@ def make_preds(model, opt, device, test_dataloader):
 
         # Compute logits
         with torch.no_grad():
-            if opt.model == "BILSTM":
+            if opt.model in ["BILSTM", "CNN"]:
                 logits = model(b_ids_tsr)
             else:
                 logits = model(b_ids_tsr, b_masks_tsr)
