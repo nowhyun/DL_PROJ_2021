@@ -8,9 +8,13 @@ warnings.filterwarnings("ignore")
 from copy import deepcopy
 import pandas as pd
 import numpy as np
+import seaborn as sns
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+mpl.style.use("ggplot")
 
 import transformers
-from transformers import BertTokenizer, BertModel, AdamW, get_linear_schedule_with_warmup
+from transformers import BertTokenizer, BertModel, ElectraTokenizer, ElectraModel, AdamW, get_linear_schedule_with_warmup
 
 import torch
 import torch.nn as nn
@@ -23,6 +27,7 @@ import torchvision
 from torchvision import transforms, datasets
 from Models.BertClf import *
 from Models.LstmClf import *
+from Models.ElectraClf import *
 
 
 #################################################################################################################
@@ -49,12 +54,29 @@ def initialize_model(opt, len_train_dataloader, device):
     :return model, optimizer, scheduler
     """
     if opt.model == "BERT":
-        model = BertClassifier(opt, freeze_bert=False)
+        model = BertClassifier(opt)
         model.to(device)
 
-        optimizer = AdamW(model.parameters(),
-                          lr=opt.lr,
-                          eps=opt.eps)
+        optimizer = AdamW([
+            {"params": model.bert.parameters(), "lr": opt.lr_pretrained, "eps": opt.eps},
+            {"params": model.classifier.parameters(), "lr": opt.lr_clf, "eps": opt.eps}
+                           ])
+        # Total number of training steps
+        total_steps = len_train_dataloader * opt.max_epoch
+
+        # Set up the learning rate scheduler
+        scheduler = get_linear_schedule_with_warmup(optimizer,
+                                                    num_warmup_steps=0,
+                                                    num_training_steps=total_steps)
+        
+    elif opt.model == "ELECTRA":
+        model = ElectraClassifier(opt)
+        model.to(device)
+
+        optimizer = AdamW([
+            {"params": model.electra.parameters(), "lr": opt.lr_pretrained, "eps": opt.eps},
+            {"params": model.classifier.parameters(), "lr": opt.lr_clf, "eps": opt.eps}
+                           ])
         # Total number of training steps
         total_steps = len_train_dataloader * opt.max_epoch
 
@@ -67,12 +89,8 @@ def initialize_model(opt, len_train_dataloader, device):
         model = LstmClassifier(opt, 30522)
         model.to(device)
 
-        optimizer = optim.SGD(model.parameters(), opt.lr,
-                            momentum=opt.momentum,
-                            weight_decay=opt.weight_decay)
-        
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, 100*len_train_dataloader)
-        
+        optimizer = torch.optim.AdamW(model.parameters(), lr=opt.lr_clf, weight_decay=opt.weight_decay)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=5, eta_min=0.0001)
     
     return model, optimizer, scheduler
 
@@ -160,8 +178,47 @@ def numOfparams(model):
     num_of_total_params = sum(p.numel() for p in model.parameters())
     return num_of_total_params
 
-def draw_embeddings(embeddings):
-    return None
+def get_sent_embedding_and_label(dataloader, model, batch_size, device):
+    """Get sentence embeddings array and labels array
+    """
+    sent_embeddings_arr = []
+    labels_arr = []
+    for i, batch in enumerate(dataloader):
+        b_ids_tsr, b_masks_tsr, b_labels_tsr = tuple(tsrs.to(device) for tsrs in batch)
+        embeddings_tsr = model.extract_sent_embd(b_ids_tsr, b_masks_tsr)
+        sent_embeddings_tsr = embeddings_tsr[:,0,:]
+        sent_embeddings_arr.append(sent_embeddings_tsr)
+        labels_arr.append(b_labels_tsr)
+        if i == 7:
+            print(f"the number of sample: {batch_size * (i+1)}")
+            break
+    sent_embeddings_arr = torch.cat(sent_embeddings_arr, dim=0).detach().cpu().numpy()
+    labels_arr = torch.cat(labels_arr).detach().cpu().numpy()
+    return sent_embeddings_arr, labels_arr
+
+def draw_embeddings(sent_embeddings_arr, labels_arr, option="pca"):
+    """Project the sentence embedding vector into a 2-dimensional space
+    """
+    if option == "pca":
+        from sklearn.decomposition import PCA
+        model = PCA(n_components=2)
+    elif option == "tsne":
+        from sklearn.manifold import TSNE 
+        model = TSNE(n_components=2)
+    projection_res = model.fit_transform(sent_embeddings_arr)
+    projection_df = pd.DataFrame()
+    projection_df["proj_x"] = projection_res[:,0]
+    projection_df["proj_y"] = projection_res[:,1]
+    projection_df["label"] = labels_arr
+    plt.figure(figsize=(16,10))
+    sns.scatterplot(x="proj_x",
+                    y="proj_y",
+                    hue="label",
+                    palette=sns.color_palette("hls", 5),
+                    data=projection_df,
+                    legend="full",
+                    alpha=0.9)
+    plt.show()
 
 def vis_attention(embeddings):
     return None
