@@ -44,6 +44,7 @@ def train_fn(model,
              optimizer,
              scheduler,
              loss_fn,
+             loss_num, # for loss func's input
              train_dataloader,
              valid_dataloader=None,
              evaluation=False):
@@ -100,7 +101,20 @@ def train_fn(model,
                 logits = model(b_ids_tsr, b_masks_tsr)
 
             # Compute loss and accumulate the loss values
-            loss = loss_fn(logits, b_labels_tsr)
+            if loss_num == 1 :
+                y = torch.randint(0,5,(logits.shape[0],))
+                onehot = torch.zeros((logits.shape[0],5))
+                onehot[range(len(b_labels_tsr)),b_labels_tsr] = 1
+                y = onehot.cuda()
+                #y = y.cpu().data.numpy()
+                #print(logits)
+                #print(y)
+                #print('loss')
+                loss = loss_fn(logits, y)
+            
+            else:
+                loss = loss_fn(logits, b_labels_tsr)
+                
             batch_loss += loss.item()
             total_loss += loss.item()
 
@@ -142,7 +156,7 @@ def train_fn(model,
             previous_valid_acc = es_eval_dict["valid_acc"]  # early stop
             # After the completion of each training epoch, measure the model's performance
             # on our validation set.
-            valid_loss, valid_acc = evaluate_fn(model, loss_fn,
+            valid_loss, valid_acc = evaluate_fn(model, loss_fn, loss_num,
                                                 valid_dataloader)
 
             # Print performance over the entire training data
@@ -177,7 +191,7 @@ def train_fn(model,
     return model, final_train_loss, final_valid_loss, final_valid_acc
 
 
-def evaluate_fn(model, loss_fn, valid_dataloader):
+def evaluate_fn(model, loss_fn, loss_num, valid_dataloader):
     """
     After the completion of each training epoch, measure the model's performance on our validation set.
     
@@ -209,7 +223,17 @@ def evaluate_fn(model, loss_fn, valid_dataloader):
                 logits = model(b_ids_tsr, b_masks_tsr)
 
         # Compute loss
-        loss = loss_fn(logits, b_labels_tsr)
+        if loss_num == 1:
+            y = torch.randint(0,5,(logits.shape[0],))
+            onehot = torch.zeros((logits.shape[0],5))
+            onehot[range(len(b_labels_tsr)),b_labels_tsr] = 1
+            y = onehot.cuda()
+            #y = y.cpu().data.numpy()
+            loss = loss_fn(logits, y)
+        
+        else:
+            loss = loss_fn(logits, b_labels_tsr)
+            
         valid_loss.append(loss.item())
 
         # Get the predictions
@@ -271,6 +295,7 @@ def cross_validation(full_dataset=None, n_splits=5):
                                                         optimizer,
                                                         scheduler,
                                                         loss_fn,
+                                                        loss_num,
                                                         train_dataloader,
                                                         valid_dataloader,
                                                         evaluation=True)
@@ -371,20 +396,24 @@ if __name__ == "__main__":
     # Load the DataLoaders
     train_dataloader, valid_dataloader, test_dataloader = data_load(opt)
 
-    # Specify the loss function
-    loss_fn = nn.CrossEntropyLoss()
+    #Specify the loss function
+    #loss_fn = nn.CrossEntropyLoss() #loss_num = 0
+    #loss_num = 1 #for input (label) : one hot encoding 
+    loss_num = 0
+    #loss_fn = FocalLoss() #loss_num = 0
+    loss_fn = nn.MultiMarginLoss(margin= 0.5) #  better than crossentropy , loss_num = 0
 
     # Initialize the model
     untrained_model, optimizer, scheduler = initialize_model(opt, len(train_dataloader), device)
 
-    trained_model, _, _, _ = train_fn(untrained_model, optimizer, scheduler, loss_fn, train_dataloader, valid_dataloader=valid_dataloader, evaluation=True)
+    trained_model, _, _, _ = train_fn(untrained_model, optimizer, scheduler, loss_fn, loss_num, train_dataloader, valid_dataloader=valid_dataloader, evaluation=True)
     
     #################################################################################################################
     # Full train
     #################################################################################################################
     full_dataloader = data_load(opt, flag="full")
     untrained_model, optimizer, scheduler = initialize_model(opt, len(train_dataloader), device)
-    full_trained_model, _, _, _ = train_fn(untrained_model, optimizer, scheduler, loss_fn, full_dataloader, evaluation=False)
+    full_trained_model, _, _, _ = train_fn(untrained_model, optimizer, scheduler, loss_fn, loss_num, full_dataloader, evaluation=False)
     model_save_path = str(opt.save_model_path) + "/" + opt.signature +'_full.model'
     if opt.save == 1: 
         torch.save(full_trained_model.state_dict(), model_save_path)
