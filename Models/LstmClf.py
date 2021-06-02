@@ -54,7 +54,18 @@ class LstmClassifier(nn.Module):
                             bidirectional=True)
         self.drop = nn.Dropout(p=opt.dropout) # opt.dropout
 
-        self.fc = nn.Linear(2*opt.hidden_dim, 5)
+        # fc original
+        # self.fc = nn.Linear(2*opt.hidden_dim, 5)
+        # fc wo dropout
+        self.fc = nn.Sequential(nn.Linear(2*opt.hidden_dim, opt.hidden_dim), 
+                                        nn.ReLU(),
+                                        nn.Linear(opt.hidden_dim, 5))
+        # # fc w dropout
+        # self.fc = nn.Sequential(nn.Linear(2*opt.hidden_dim, opt.hidden_dim), 
+        #                                 nn.ReLU(),
+        #                                 self.drop,
+        #                                 nn.Linear(opt.hidden_dim, 5))
+
 
     def forward(self, input_ids):
         """

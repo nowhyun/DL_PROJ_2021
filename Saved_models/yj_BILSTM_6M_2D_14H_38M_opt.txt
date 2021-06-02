@@ -1,0 +1,31 @@
+{
+  "model": "BILSTM",
+  "sent_embedding": 0,
+  "hidden_dim": 768,
+  "num_layer": 2,
+  "embedding_dim": 256,
+  "kernel_sizes": [
+    3,
+    4,
+    5
+  ],
+  "kernel_depth": 500,
+  "dropout": 0.5,
+  "batch_size": 16,
+  "gpu": 1,
+  "max_epoch": 50,
+  "save": 1,
+  "lr_pretrained": 1e-05,
+  "lr_clf": 0.0001,
+  "freeze_pretrained": 0,
+  "eps": 1e-08,
+  "weight_decay": 0.0005,
+  "data_path": "./Dataset",
+  "save_model_path": "./Saved_models",
+  "save_submission_path": "./Submissions",
+  "max_len": 50,
+  "aug": 0,
+  "split_ratio": 1,
+  "author": "yj",
+  "signature": "yj_BILSTM_6M_2D_14H_38M"
+}

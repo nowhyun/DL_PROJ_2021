@@ -46,6 +46,8 @@ class ConvClassifier(nn.Module):
         """
         super(ConvClassifier, self).__init__()
         
+        # self.hidden_dim = 64
+        
         self.embedding = nn.Embedding(num_embeddings=vocab_size, embedding_dim=opt.embedding_dim)
         self.convs = nn.ModuleList([
             nn.Conv1d(in_channels=opt.embedding_dim,
@@ -57,7 +59,18 @@ class ConvClassifier(nn.Module):
         
         self.drop = nn.Dropout(p=opt.dropout) # opt.dropout
 
+        # fc original
         self.fc = nn.Linear(len(opt.kernel_sizes) * opt.kernel_depth, 5)
+
+        # fc wo dropout
+        self.fc = nn.Sequential(nn.Linear(len(opt.kernel_sizes) * opt.kernel_depth, opt.hidden_dim), 
+                                        nn.ReLU(),
+                                        nn.Linear(opt.hidden_dim, 5))
+        # # fc w dropout
+        # self.fc = nn.Sequential(nn.Linear(len(opt.kernel_sizes) * opt.kernel_depth, opt.hidden_dim), 
+        #                                 nn.ReLU(),
+        #                                 self.drop,
+        #                                 nn.Linear(opt.hidden_dim, 5))
 
     def forward(self, input_ids):
         """
